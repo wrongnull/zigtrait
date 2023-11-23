@@ -116,7 +116,7 @@ test "is" {
 pub fn isPtrTo(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (!comptime isSingleItemPtr(T)) return false;
+            if (!isSingleItemPtr(T)) return false;
             return id == @typeInfo(meta.Child(T));
         }
     };
@@ -350,6 +350,28 @@ test "isConstPtr" {
     try testing.expect(isConstPtr(@TypeOf(&c)));
     try testing.expect(!isConstPtr(*@TypeOf(t)));
     try testing.expect(!isConstPtr(@TypeOf(6)));
+}
+
+pub inline fn isVolatilePtr(comptime T: type) bool {
+    if (!is(.Pointer)(T)) return false;
+    return @typeInfo(T).Pointer.is_volatile;
+}
+
+test "isVolatilePtr" {
+    const x: u8 = 0;
+    try testing.expect(isVolatilePtr(*volatile @TypeOf(x)));
+    try testing.expect(isVolatilePtr(*const volatile ?fn (@TypeOf(x)) void));
+    try testing.expect(!isVolatilePtr(@TypeOf(&x)));
+}
+
+pub inline fn isAllowzeroPtr(comptime T: type) bool {
+    if (!is(.Pointer)(T)) return false;
+    return @typeInfo(T).Pointer.is_allowzero;
+}
+
+test "isAllowzeroPtr" {
+    try testing.expect(isAllowzeroPtr(* const allowzero u8));
+    try testing.expect(!isAllowzeroPtr(@TypeOf(42)));
 }
 
 pub inline fn isContainer(comptime T: type) bool {
