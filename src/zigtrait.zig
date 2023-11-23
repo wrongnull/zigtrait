@@ -650,3 +650,43 @@ test "hasUniqueRepresentation" {
 
     try testing.expect(hasUniqueRepresentation(@Vector(4, u16)));
 }
+
+/// True if type can be used only in comppile-time
+pub inline fn isComptimeOnly(comptime T: type) bool {
+    return @typeInfo(@TypeOf(.{_indicateComptime(T)})).Struct.fields[0].is_comptime;
+}
+
+fn _indicateComptime(comptime T: type) T {
+    return undefined;
+}
+
+test "isComptimeOnly" {
+    const ComptimeStringMap = std.comptime_string_map.ComptimeStringMap;
+    const TestEnum = enum {
+        A,
+        B,
+        C,
+        D,
+        E,
+    };
+    const map = ComptimeStringMap(TestEnum, .{
+        .{ "these", .D },
+        .{ "have", .A },
+        .{ "nothing", .B },
+        .{ "incommon", .C },
+        .{ "samelen", .E },
+    });
+    const ComptimeType = struct {
+        field: type,
+    };
+    const NonComptimeType = struct {
+        field: u8,
+    };
+
+    const test_comptime_types = [_]type{ comptime_int, comptime_float, u0, i0, map, fn (comptime_int) void, ComptimeType };
+    const test_runtime_types = [_]type{ u1, i1, u8, i8, u16, i16, u29, u32, i32, u64, i64, NonComptimeType, *const fn (u32) callconv(.C) u32 };
+    inline for (test_comptime_types) |T|
+        try testing.expect(isComptimeOnly(T));
+    inline for (test_runtime_types) |T|
+        try testing.expect(!isComptimeOnly(T));
+}
