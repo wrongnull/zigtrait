@@ -370,7 +370,7 @@ pub inline fn isAllowzeroPtr(comptime T: type) bool {
 }
 
 test "isAllowzeroPtr" {
-    try testing.expect(isAllowzeroPtr(* const allowzero u8));
+    try testing.expect(isAllowzeroPtr(*allowzero const u8));
     try testing.expect(!isAllowzeroPtr(@TypeOf(42)));
 }
 
@@ -711,4 +711,29 @@ test "isComptimeOnly" {
         try testing.expect(isComptimeOnly(T));
     inline for (test_runtime_types) |T|
         try testing.expect(!isComptimeOnly(T));
+}
+
+pub inline fn isExhaustiveEnum(comptime T: type) bool {
+    if (!is(.Enum)(T)) return false;
+    return @typeInfo(T).Enum.is_exhaustive;
+}
+
+test "isExhaustiveEnum" {
+    const NonExhaustive = enum(u8) {
+        a,
+        b,
+        c,
+        d,
+        _,
+    };
+    const Exhaustive = enum(u64) {
+        a,
+        b,
+        c,
+        d,
+    };
+
+    try testing.expect(!isExhaustiveEnum(NonExhaustive));
+    try testing.expect(isExhaustiveEnum(Exhaustive));
+    try testing.expect(!isExhaustiveEnum(u8));
 }
