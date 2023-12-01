@@ -45,8 +45,8 @@ test "multiTrait" {
 pub fn hasFn(comptime name: []const u8) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (!comptime isContainer(T)) return false;
-            if (!comptime @hasDecl(T, name)) return false;
+            if (!isContainer(T)) return false;
+            if (!@hasDecl(T, name)) return false;
             const DeclType = @TypeOf(@field(T, name));
             return @typeInfo(DeclType) == .Fn;
         }
@@ -132,7 +132,7 @@ test "isPtrTo" {
 pub fn isSliceOf(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (!comptime isSlice(T)) return false;
+            if (!isSlice(T)) return false;
             return id == @typeInfo(meta.Child(T));
         }
     };
@@ -222,8 +222,8 @@ pub inline fn isSingleItemPtr(comptime T: type) bool {
 
 test "isSingleItemPtr" {
     const array = [_]u8{0} ** 10;
-    try comptime testing.expect(isSingleItemPtr(@TypeOf(&array[0])));
-    try comptime testing.expect(!isSingleItemPtr(@TypeOf(array)));
+    try testing.expect(isSingleItemPtr(@TypeOf(&array[0])));
+    try testing.expect(!isSingleItemPtr(@TypeOf(array)));
     var runtime_zero: usize = 0;
     _ = &runtime_zero;
     try testing.expect(!isSingleItemPtr(@TypeOf(array[runtime_zero..1])));
