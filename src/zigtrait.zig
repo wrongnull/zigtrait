@@ -737,3 +737,34 @@ test "isExhaustiveEnum" {
     try testing.expect(isExhaustiveEnum(Exhaustive));
     try testing.expect(!isExhaustiveEnum(u8));
 }
+
+pub inline fn isGenericFunction(comptime T: type) bool {
+    if (is(.Pointer)(T) and is(.Fn)(@typeInfo(T).Pointer.child))
+        return isGenericFunction(@typeInfo(T).Pointer.child);
+    if (!is(.Fn)(T))
+        return false;
+    return @typeInfo(T).Fn.is_generic;
+}
+
+test "isGeneicFunction" {
+    const generic_function_types = [_]type{
+        fn (anytype) void,
+        // wait for async implemetation in the self-hosted compiler
+        //fn (anyframe) u8,
+        fn () type,
+    };
+    const non_generic_function_types = [_]type{
+        fn (u8) callconv(.Naked) void,
+        fn () void,
+        fn (u29) u111,
+        fn (c_int) c_longdouble,
+    };
+    inline for (generic_function_types) |T| {
+        try testing.expect(isGenericFunction(T));
+        try testing.expect(isGenericFunction(*const T));
+    }
+    inline for (non_generic_function_types) |T| {
+        try testing.expect(!isGenericFunction(T));
+        try testing.expect(!isGenericFunction(*const T));
+    }
+}
