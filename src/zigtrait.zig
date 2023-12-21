@@ -116,7 +116,7 @@ test "is" {
 pub fn isPtrTo(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (!isSingleItemPtr(T)) return false;
+            if (!ptrOfSize(.One)(T)) return false;
             return id == @typeInfo(meta.Child(T));
         }
     };
@@ -132,7 +132,7 @@ test "isPtrTo" {
 pub fn isSliceOf(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (!isSlice(T)) return false;
+            if (!ptrOfSize(.Slice)(T)) return false;
             return id == @typeInfo(meta.Child(T));
         }
     };
@@ -145,116 +145,93 @@ test "isSliceOf" {
     try testing.expect(!isSliceOf(.Struct)([][]struct {}));
 }
 
-///////////Strait trait Fns
-
-//@TODO:
-// Somewhat limited since we can't apply this logic to normal variables, fields, or
-//  Fns yet. Should be isExternType?
-pub inline fn isExtern(comptime T: type) bool {
-    return switch (@typeInfo(T)) {
-        .Struct => |s| s.layout == .Extern,
-        .Union => |u| u.layout == .Extern,
-        else => false,
+pub fn containerOfLayout(comptime container_layuout: std.builtin.Type.ContainerLayout) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            return switch (@typeInfo(T)) {
+                .Struct => |@"struct"| @"struct".layout == container_layuout,
+                .Union => |@"union"| @"union".layout == container_layuout,
+                else => false,
+            };
+        }
     };
+    return Closure.trait;
 }
 
-test "isExtern" {
+test "conainerOfLayout" {
+    const isExtern = containerOfLayout(.Extern);
+    const isPacked = containerOfLayout(.Packed);
+
     const TestExStruct = extern struct {};
+    const TestPStruct = packed struct {};
     const TestStruct = struct {};
 
     try testing.expect(isExtern(TestExStruct));
     try testing.expect(!isExtern(TestStruct));
     try testing.expect(!isExtern(u8));
-}
-
-pub inline fn isPacked(comptime T: type) bool {
-    return switch (@typeInfo(T)) {
-        .Struct => |s| s.layout == .Packed,
-        .Union => |u| u.layout == .Packed,
-        else => false,
-    };
-}
-
-test "isPacked" {
-    const TestPStruct = packed struct {};
-    const TestStruct = struct {};
 
     try testing.expect(isPacked(TestPStruct));
     try testing.expect(!isPacked(TestStruct));
     try testing.expect(!isPacked(u8));
 }
 
-pub inline fn isUnsignedInt(comptime T: type) bool {
-    return switch (@typeInfo(T)) {
-        .Int => |i| i.signedness == .unsigned,
-        else => false,
+pub fn intOfSignedness(comptime int_signedness: std.builtin.Signedness) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            return switch (@typeInfo(T)) {
+                .Int => |i| i.signedness == int_signedness,
+                .ComptimeInt => int_signedness == .signed,
+                else => false,
+            };
+        }
     };
+    return Closure.trait;
 }
 
-test "isUnsignedInt" {
+test "intOfSignedness" {
+    const isUnsignedInt = intOfSignedness(.unsigned);
+    const isSignedInt = intOfSignedness(.signed);
+
     try testing.expect(isUnsignedInt(u32) == true);
     try testing.expect(isUnsignedInt(comptime_int) == false);
     try testing.expect(isUnsignedInt(i64) == false);
     try testing.expect(isUnsignedInt(f64) == false);
-}
 
-pub inline fn isSignedInt(comptime T: type) bool {
-    return switch (@typeInfo(T)) {
-        .ComptimeInt => true,
-        .Int => |i| i.signedness == .signed,
-        else => false,
-    };
-}
-
-test "isSignedInt" {
     try testing.expect(isSignedInt(u32) == false);
     try testing.expect(isSignedInt(comptime_int) == true);
     try testing.expect(isSignedInt(i64) == true);
     try testing.expect(isSignedInt(f64) == false);
 }
 
-pub inline fn isSingleItemPtr(comptime T: type) bool {
-    if (is(.Pointer)(T)) {
-        return @typeInfo(T).Pointer.size == .One;
-    }
-    return false;
+pub fn ptrOfSize(comptime ptr_size: std.builtin.Type.Pointer.Size) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            if (is(.Pointer)(T))
+                return @typeInfo(T).Pointer.size == ptr_size;
+            return false;
+        }
+    };
+    return Closure.trait;
 }
 
 test "isSingleItemPtr" {
+    const isSingleItemPtr = ptrOfSize(.One);
+    const isManyItemPtr = ptrOfSize(.Many);
+    const isSlice = ptrOfSize(.Slice);
+
     const array = [_]u8{0} ** 10;
-    try testing.expect(isSingleItemPtr(@TypeOf(&array[0])));
-    try testing.expect(!isSingleItemPtr(@TypeOf(array)));
     var runtime_zero: usize = 0;
     _ = &runtime_zero;
+
+    try testing.expect(isSingleItemPtr(@TypeOf(&array[0])));
+    try testing.expect(!isSingleItemPtr(@TypeOf(array)));
     try testing.expect(!isSingleItemPtr(@TypeOf(array[runtime_zero..1])));
-}
 
-pub inline fn isManyItemPtr(comptime T: type) bool {
-    if (is(.Pointer)(T)) {
-        return @typeInfo(T).Pointer.size == .Many;
-    }
-    return false;
-}
-
-test "isManyItemPtr" {
-    const array = [_]u8{0} ** 10;
     const mip = @as([*]const u8, @ptrCast(&array[0]));
     try testing.expect(isManyItemPtr(@TypeOf(mip)));
     try testing.expect(!isManyItemPtr(@TypeOf(array)));
     try testing.expect(!isManyItemPtr(@TypeOf(array[0..1])));
-}
 
-pub inline fn isSlice(comptime T: type) bool {
-    if (is(.Pointer)(T)) {
-        return @typeInfo(T).Pointer.size == .Slice;
-    }
-    return false;
-}
-
-test "isSlice" {
-    const array = [_]u8{0} ** 10;
-    var runtime_zero: usize = 0;
-    _ = &runtime_zero;
     try testing.expect(isSlice(@TypeOf(array[runtime_zero..])));
     try testing.expect(!isSlice(@TypeOf(array)));
     try testing.expect(!isSlice(@TypeOf(&array[0])));
@@ -337,39 +314,41 @@ test "isFloat" {
     try testing.expect(!isFloat([]f32));
 }
 
-pub inline fn isConstPtr(comptime T: type) bool {
-    if (!is(.Pointer)(T)) return false;
-    return @typeInfo(T).Pointer.is_const;
+pub const PointerQualifiers = enum {
+    @"const",
+    @"allowzero",
+    @"volatile",
+};
+
+pub fn ptrQualifiedWith(comptime qualifier: PointerQualifiers) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            if (!is(.Pointer)(T)) return false;
+            return @field(@typeInfo(T).Pointer, "is_" ++ @tagName(qualifier));
+        }
+    };
+    return Closure.trait;
 }
 
-test "isConstPtr" {
+test "ptrQualifiedWith" {
+    const isConstPtr = ptrQualifiedWith(.@"const");
+    const isAllowzeroPtr = ptrQualifiedWith(.@"allowzero");
+    const isVolatilePtr = ptrQualifiedWith(.@"volatile");
+
     var t: u8 = 0;
     t = t;
     const c: u8 = 0;
+
+    try testing.expect(isConstPtr(@TypeOf(&c)));
     try testing.expect(isConstPtr(*const @TypeOf(t)));
     try testing.expect(isConstPtr(@TypeOf(&c)));
     try testing.expect(!isConstPtr(*@TypeOf(t)));
     try testing.expect(!isConstPtr(@TypeOf(6)));
-}
 
-pub inline fn isVolatilePtr(comptime T: type) bool {
-    if (!is(.Pointer)(T)) return false;
-    return @typeInfo(T).Pointer.is_volatile;
-}
+    try testing.expect(isVolatilePtr(*volatile @TypeOf(t)));
+    try testing.expect(isVolatilePtr(*const volatile ?fn (@TypeOf(t)) void));
+    try testing.expect(!isVolatilePtr(@TypeOf(&t)));
 
-test "isVolatilePtr" {
-    const x: u8 = 0;
-    try testing.expect(isVolatilePtr(*volatile @TypeOf(x)));
-    try testing.expect(isVolatilePtr(*const volatile ?fn (@TypeOf(x)) void));
-    try testing.expect(!isVolatilePtr(@TypeOf(&x)));
-}
-
-pub inline fn isAllowzeroPtr(comptime T: type) bool {
-    if (!is(.Pointer)(T)) return false;
-    return @typeInfo(T).Pointer.is_allowzero;
-}
-
-test "isAllowzeroPtr" {
     try testing.expect(isAllowzeroPtr(*allowzero const u8));
     try testing.expect(!isAllowzeroPtr(@TypeOf(42)));
 }
@@ -738,15 +717,25 @@ test "isExhaustiveEnum" {
     try testing.expect(!isExhaustiveEnum(u8));
 }
 
-pub inline fn isGenericFunction(comptime T: type) bool {
-    if (is(.Pointer)(T) and is(.Fn)(@typeInfo(T).Pointer.child))
-        return isGenericFunction(@typeInfo(T).Pointer.child);
-    if (!is(.Fn)(T))
-        return false;
-    return @typeInfo(T).Fn.is_generic;
+pub const FunctionProperties = enum {
+    generic,
+    var_args,
+};
+
+pub fn functionIs(comptime property: FunctionProperties) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            if (is(.Pointer)(T) and is(.Fn)(meta.Child(T)))
+                return trait(meta.Child(T));
+            return is(.Fn)(T) and @field(@typeInfo(T).Fn, "is_" ++ @tagName(property));
+        }
+    };
+    return Closure.trait;
 }
 
 test "isGeneicFunction" {
+    const isGenericFunction = functionIs(.generic);
+
     const generic_function_types = [_]type{
         fn (anytype) void,
         // wait for async implemetation in the self-hosted compiler
