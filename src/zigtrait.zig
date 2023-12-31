@@ -149,8 +149,7 @@ pub fn containerOfLayout(comptime container_layuout: std.builtin.Type.ContainerL
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
             return switch (@typeInfo(T)) {
-                .Struct => |@"struct"| @"struct".layout == container_layuout,
-                .Union => |@"union"| @"union".layout == container_layuout,
+                inline .Struct, .Union => |container| container.layout == container_layuout,
                 else => false,
             };
         }
