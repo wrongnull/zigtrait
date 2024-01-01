@@ -7,12 +7,23 @@ const meta = std.meta;
 
 pub const TraitFn = fn (type) callconv(.Inline) bool;
 
-pub fn multiTrait(comptime traits: anytype) TraitFn {
+pub const PredicatePolicy = enum {
+    All,
+    Any,
+};
+
+pub fn multiTrait(comptime policy: PredicatePolicy, comptime traits: anytype) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
+            // TODO: Decide if this call is necessary here
+            //@setEvalBranchQuota(traits.len + 2);
+            comptime var accumulator = 0;
             inline for (traits) |t|
-                if (!t(T)) return false;
-            return true;
+                accumulator += @intCast(@intFromBool(comptime t(T)));
+            return switch (policy) {
+                .All => accumulator == traits.len,
+                .Any => accumulator > 0,
+            };
         }
     };
     return Closure.trait;
@@ -33,7 +44,7 @@ test "multiTrait" {
         }
     };
 
-    const isVector = multiTrait(.{
+    const isVector = multiTrait(.All, .{
         hasFn("add"),
         hasField("x"),
         hasField("y"),
@@ -47,8 +58,7 @@ pub fn hasFn(comptime name: []const u8) TraitFn {
         pub inline fn trait(comptime T: type) bool {
             if (!isContainer(T)) return false;
             if (!@hasDecl(T, name)) return false;
-            const DeclType = @TypeOf(@field(T, name));
-            return @typeInfo(DeclType) == .Fn;
+            return is(.Fn)(@TypeOf(@field(T, name)));
         }
     };
     return Closure.trait;
@@ -236,7 +246,11 @@ pub inline fn isIndexable(comptime T: type) bool {
             return is(.Array)(meta.Child(T));
         return true;
     }
-    return is(.Array)(T) or is(.Vector)(T) or isTuple(T);
+    return multiTrait(.Any, .{
+        is(.Array),
+        is(.Vector),
+        isTuple,
+    })(T);
 }
 
 test "isIndexable" {
@@ -254,10 +268,12 @@ test "isIndexable" {
 }
 
 pub inline fn isNumber(comptime T: type) bool {
-    return switch (@typeInfo(T)) {
-        .Int, .Float, .ComptimeInt, .ComptimeFloat => true,
-        else => false,
-    };
+    return multiTrait(.Any, .{
+        is(.Int),
+        is(.ComptimeInt),
+        is(.Float),
+        is(.ComptimeFloat),
+    })(T);
 }
 
 test "isNumber" {
@@ -275,10 +291,10 @@ test "isNumber" {
 }
 
 pub inline fn isIntegral(comptime T: type) bool {
-    return switch (@typeInfo(T)) {
-        .Int, .ComptimeInt => true,
-        else => false,
-    };
+    return multiTrait(.Any, .{
+        is(.Int),
+        is(.ComptimeInt),
+    })(T);
 }
 
 test "isIntegral" {
@@ -291,10 +307,10 @@ test "isIntegral" {
 }
 
 pub inline fn isFloat(comptime T: type) bool {
-    return switch (@typeInfo(T)) {
-        .Float, .ComptimeFloat => true,
-        else => false,
-    };
+    return multiTrait(.Any, .{
+        is(.Float),
+        is(.ComptimeFloat),
+    })(T);
 }
 
 test "isFloat" {
@@ -345,10 +361,12 @@ test "ptrQualifiedWith" {
 }
 
 pub inline fn isContainer(comptime T: type) bool {
-    return switch (@typeInfo(T)) {
-        .Struct, .Union, .Enum, .Opaque => true,
-        else => false,
-    };
+    return multiTrait(.Any, .{
+        is(.Struct),
+        is(.Union),
+        is(.Enum),
+        is(.Opaque),
+    })(T);
 }
 
 test "isContainer" {
@@ -400,8 +418,10 @@ pub inline fn isZigString(comptime T: type) bool {
         if (!is(.Pointer)(T))
             break :blk false;
         // Check for CV qualifiers that would prevent coerction to []const u8
-        if (ptrQualifiedWith(.@"volatile")(T) or ptrQualifiedWith(.@"allowzero")(T)) break :blk false;
-
+        if (multiTrait(.Any, .{
+            ptrQualifiedWith(.@"allowzero"),
+            ptrQualifiedWith(.@"volatile"),
+        })(T)) break :blk false;
         // If it's already a slice, simple check.
         if (ptrOfSize(.Slice)(T))
             break :blk meta.Child(T) == u8;
@@ -453,93 +473,6 @@ test "isZigString" {
     try testing.expect(!isZigString([]volatile u8));
     try testing.expect(!isZigString(*allowzero [4]u8));
     try testing.expect(!isZigString(*volatile [4]u8));
-}
-
-pub fn hasDecls(comptime names: anytype) TraitFn {
-    const Closure = struct {
-        pub inline fn trait(comptime T: type) bool {
-            inline for (names) |name| {
-                if (!@hasDecl(T, name))
-                    return false;
-            }
-            return true;
-        }
-    };
-    return Closure.trait;
-}
-
-test "hasDecls" {
-    const TestStruct1 = struct {};
-    const TestStruct2 = struct {
-        pub var a: u32 = undefined;
-        pub var b: u32 = undefined;
-        c: bool,
-        pub fn useless() void {}
-    };
-
-    try testing.expect(!hasDecls(.{"a"})(TestStruct1));
-    try testing.expect(hasDecls(.{ "a", "b" })(TestStruct2));
-    try testing.expect(hasDecls(.{ "a", "b", "useless" })(TestStruct2));
-    try testing.expect(!hasDecls(.{ "a", "b", "c" })(TestStruct2));
-}
-
-pub fn hasFields(comptime names: anytype) TraitFn {
-    const Closure = struct {
-        pub inline fn trait(comptime T: type) bool {
-            inline for (names) |name| {
-                if (!@hasField(T, name))
-                    return false;
-            }
-            return true;
-        }
-    };
-    return Closure.trait;
-}
-
-test "hasFields" {
-    const TestStruct1 = struct {};
-    const TestStruct2 = struct {
-        a: u32,
-        b: u32,
-        c: bool,
-        pub fn useless() void {}
-    };
-
-    const tuple = .{ "a", "b", "c" };
-
-    try testing.expect(!hasFields(.{"a"})(TestStruct1));
-    try testing.expect(hasFields(.{ "a", "b" })(TestStruct2));
-    try testing.expect(hasFields(.{ "a", "b", "c" })(TestStruct2));
-    try testing.expect(hasFields(tuple)(TestStruct2));
-    try testing.expect(!hasFields(.{ "a", "b", "useless" })(TestStruct2));
-}
-
-pub fn hasFunctions(comptime names: anytype) TraitFn {
-    const Closure = struct {
-        pub inline fn trait(comptime T: type) bool {
-            inline for (names) |name| {
-                if (!hasFn(name)(T))
-                    return false;
-            }
-            return true;
-        }
-    };
-    return Closure.trait;
-}
-
-test "hasFunctions" {
-    const TestStruct1 = struct {};
-    const TestStruct2 = struct {
-        pub fn a() void {}
-        fn b() void {}
-    };
-
-    const tuple = .{ "a", "b", "c" };
-
-    try testing.expect(!hasFunctions(.{"a"})(TestStruct1));
-    try testing.expect(hasFunctions(.{ "a", "b" })(TestStruct2));
-    try testing.expect(!hasFunctions(.{ "a", "b", "c" })(TestStruct2));
-    try testing.expect(!hasFunctions(tuple)(TestStruct2));
 }
 
 /// True if every value of the type `T` has a unique bit pattern representing it.
@@ -722,7 +655,7 @@ pub const FunctionProperties = enum {
 pub fn functionIs(comptime property: FunctionProperties) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (is(.Pointer)(T) and is(.Fn)(meta.Child(T)))
+            if (ptrOfSize(.One)(T) and is(.Fn)(meta.Child(T)))
                 return trait(meta.Child(T));
             return is(.Fn)(T) and @field(@typeInfo(T).Fn, "is_" ++ @tagName(property));
         }
