@@ -68,9 +68,7 @@ pub fn hasField(comptime name: []const u8) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
             const fields = switch (@typeInfo(T)) {
-                .Struct => |s| s.fields,
-                .Union => |u| u.fields,
-                .Enum => |e| e.fields,
+                inline .Struct, .Union, .Enum => |c| c.fields,
                 else => return false,
             };
 
@@ -116,8 +114,7 @@ test "is" {
 pub fn isPtrTo(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (!ptrOfSize(.One)(T)) return false;
-            return id == @typeInfo(meta.Child(T));
+            return ptrOfSize(.One)(T) and is(id)(meta.Child(T));
         }
     };
     return Closure.trait;
@@ -132,8 +129,7 @@ test "isPtrTo" {
 pub fn isSliceOf(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (!ptrOfSize(.Slice)(T)) return false;
-            return id == @typeInfo(meta.Child(T));
+            return ptrOfSize(.Slice)(T) and is(id)(meta.Child(T));
         }
     };
     return Closure.trait;
@@ -205,9 +201,7 @@ test "intOfSignedness" {
 pub fn ptrOfSize(comptime ptr_size: std.builtin.Type.Pointer.Size) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (is(.Pointer)(T))
-                return @typeInfo(T).Pointer.size == ptr_size;
-            return false;
+            return is(.Pointer)(T) and @typeInfo(T).Pointer.size == ptr_size;
         }
     };
     return Closure.trait;
@@ -238,9 +232,8 @@ test "isSingleItemPtr" {
 
 pub inline fn isIndexable(comptime T: type) bool {
     if (is(.Pointer)(T)) {
-        if (@typeInfo(T).Pointer.size == .One) {
-            return (is(.Array)(meta.Child(T)));
-        }
+        if (ptrOfSize(.One)(T))
+            return is(.Array)(meta.Child(T));
         return true;
     }
     return is(.Array)(T) or is(.Vector)(T) or isTuple(T);
@@ -322,8 +315,7 @@ pub const PointerQualifiers = enum {
 pub fn ptrQualifiedWith(comptime qualifier: PointerQualifiers) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (!is(.Pointer)(T)) return false;
-            return @field(@typeInfo(T).Pointer, "is_" ++ @tagName(qualifier));
+            return is(.Pointer)(T) and @field(@typeInfo(T).Pointer, "is_" ++ @tagName(qualifier));
         }
     };
     return Closure.trait;
@@ -405,25 +397,20 @@ test "isTuple" {
 pub inline fn isZigString(comptime T: type) bool {
     return blk: {
         // Only pointer types can be strings, no optionals
-        const info = @typeInfo(T);
-        if (info != .Pointer) break :blk false;
-
-        const ptr = &info.Pointer;
+        if (!is(.Pointer)(T))
+            break :blk false;
         // Check for CV qualifiers that would prevent coerction to []const u8
-        if (ptr.is_volatile or ptr.is_allowzero) break :blk false;
+        if (ptrQualifiedWith(.@"volatile")(T) or ptrQualifiedWith(.@"allowzero")(T)) break :blk false;
 
         // If it's already a slice, simple check.
-        if (ptr.size == .Slice) {
-            break :blk ptr.child == u8;
-        }
+        if (ptrOfSize(.Slice)(T))
+            break :blk meta.Child(T) == u8;
 
         // Otherwise check if it's an array type that coerces to slice.
-        if (ptr.size == .One) {
-            const child = @typeInfo(ptr.child);
-            if (child == .Array) {
-                const arr = &child.Array;
-                break :blk arr.child == u8;
-            }
+        if (ptrOfSize(.One)(T)) {
+            const child = meta.Child(T);
+            if (is(.Array)(child))
+                break :blk meta.Child(child) == u8;
         }
 
         break :blk false;
@@ -468,12 +455,17 @@ test "isZigString" {
     try testing.expect(!isZigString(*volatile [4]u8));
 }
 
-pub inline fn hasDecls(comptime T: type, comptime names: anytype) bool {
-    inline for (names) |name| {
-        if (!@hasDecl(T, name))
-            return false;
-    }
-    return true;
+pub fn hasDecls(comptime names: anytype) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            inline for (names) |name| {
+                if (!@hasDecl(T, name))
+                    return false;
+            }
+            return true;
+        }
+    };
+    return Closure.trait;
 }
 
 test "hasDecls" {
@@ -485,21 +477,23 @@ test "hasDecls" {
         pub fn useless() void {}
     };
 
-    const tuple = .{ "a", "b", "c" };
-
-    try testing.expect(!hasDecls(TestStruct1, .{"a"}));
-    try testing.expect(hasDecls(TestStruct2, .{ "a", "b" }));
-    try testing.expect(hasDecls(TestStruct2, .{ "a", "b", "useless" }));
-    try testing.expect(!hasDecls(TestStruct2, .{ "a", "b", "c" }));
-    try testing.expect(!hasDecls(TestStruct2, tuple));
+    try testing.expect(!hasDecls(.{"a"})(TestStruct1));
+    try testing.expect(hasDecls(.{ "a", "b" })(TestStruct2));
+    try testing.expect(hasDecls(.{ "a", "b", "useless" })(TestStruct2));
+    try testing.expect(!hasDecls(.{ "a", "b", "c" })(TestStruct2));
 }
 
-pub inline fn hasFields(comptime T: type, comptime names: anytype) bool {
-    inline for (names) |name| {
-        if (!@hasField(T, name))
-            return false;
-    }
-    return true;
+pub fn hasFields(comptime names: anytype) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            inline for (names) |name| {
+                if (!@hasField(T, name))
+                    return false;
+            }
+            return true;
+        }
+    };
+    return Closure.trait;
 }
 
 test "hasFields" {
@@ -513,19 +507,24 @@ test "hasFields" {
 
     const tuple = .{ "a", "b", "c" };
 
-    try testing.expect(!hasFields(TestStruct1, .{"a"}));
-    try testing.expect(hasFields(TestStruct2, .{ "a", "b" }));
-    try testing.expect(hasFields(TestStruct2, .{ "a", "b", "c" }));
-    try testing.expect(hasFields(TestStruct2, tuple));
-    try testing.expect(!hasFields(TestStruct2, .{ "a", "b", "useless" }));
+    try testing.expect(!hasFields(.{"a"})(TestStruct1));
+    try testing.expect(hasFields(.{ "a", "b" })(TestStruct2));
+    try testing.expect(hasFields(.{ "a", "b", "c" })(TestStruct2));
+    try testing.expect(hasFields(tuple)(TestStruct2));
+    try testing.expect(!hasFields(.{ "a", "b", "useless" })(TestStruct2));
 }
 
-pub inline fn hasFunctions(comptime T: type, comptime names: anytype) bool {
-    inline for (names) |name| {
-        if (!hasFn(name)(T))
-            return false;
-    }
-    return true;
+pub fn hasFunctions(comptime names: anytype) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            inline for (names) |name| {
+                if (!hasFn(name)(T))
+                    return false;
+            }
+            return true;
+        }
+    };
+    return Closure.trait;
 }
 
 test "hasFunctions" {
@@ -537,33 +536,33 @@ test "hasFunctions" {
 
     const tuple = .{ "a", "b", "c" };
 
-    try testing.expect(!hasFunctions(TestStruct1, .{"a"}));
-    try testing.expect(hasFunctions(TestStruct2, .{ "a", "b" }));
-    try testing.expect(!hasFunctions(TestStruct2, .{ "a", "b", "c" }));
-    try testing.expect(!hasFunctions(TestStruct2, tuple));
+    try testing.expect(!hasFunctions(.{"a"})(TestStruct1));
+    try testing.expect(hasFunctions(.{ "a", "b" })(TestStruct2));
+    try testing.expect(!hasFunctions(.{ "a", "b", "c" })(TestStruct2));
+    try testing.expect(!hasFunctions(tuple)(TestStruct2));
 }
 
 /// True if every value of the type `T` has a unique bit pattern representing it.
 /// In other words, `T` has no unused bits and no padding.
 pub inline fn hasUniqueRepresentation(comptime T: type) bool {
-    switch (@typeInfo(T)) {
-        else => return false, // TODO can we know if it's true for some of these types ?
+    return switch (@typeInfo(T)) {
+        else => false, // TODO can we know if it's true for some of these types ?
 
         .AnyFrame,
         .Enum,
         .ErrorSet,
         .Fn,
-        => return true,
+        => true,
 
-        .Bool => return false,
+        .Bool => false,
 
-        .Int => |info| return @sizeOf(T) * 8 == info.bits,
+        .Int => @sizeOf(T) * @bitSizeOf(c_char) == @bitSizeOf(T),
 
-        .Pointer => |info| return info.size != .Slice,
+        .Pointer => !ptrOfSize(.Slice)(T),
 
-        .Array => |info| return hasUniqueRepresentation(info.child),
+        .Array => hasUniqueRepresentation(meta.Child(T)),
 
-        .Struct => |info| {
+        .Struct => |info| blk: {
             var sum_size = @as(usize, 0);
 
             inline for (info.fields) |field| {
@@ -572,12 +571,12 @@ pub inline fn hasUniqueRepresentation(comptime T: type) bool {
                 sum_size += @sizeOf(FieldType);
             }
 
-            return @sizeOf(T) == sum_size;
+            break :blk @sizeOf(T) == sum_size;
         },
 
-        .Vector => |info| return hasUniqueRepresentation(info.child) and
+        .Vector => |info| hasUniqueRepresentation(info.child) and
             @sizeOf(T) == @sizeOf(info.child) * info.len,
-    }
+    };
 }
 
 test "hasUniqueRepresentation" {
@@ -692,8 +691,7 @@ test "isComptimeOnly" {
 }
 
 pub inline fn isExhaustiveEnum(comptime T: type) bool {
-    if (!is(.Enum)(T)) return false;
-    return @typeInfo(T).Enum.is_exhaustive;
+    return is(.Enum)(T) and @typeInfo(T).Enum.is_exhaustive;
 }
 
 test "isExhaustiveEnum" {
