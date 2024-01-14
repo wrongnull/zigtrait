@@ -3,7 +3,7 @@ const mem = std.mem;
 const debug = std.debug;
 const testing = std.testing;
 
-const meta = std.meta;
+const Child = std.meta.Child;
 
 pub const TraitFn = fn (type) callconv(.Inline) bool;
 
@@ -124,7 +124,7 @@ test "is" {
 pub fn isPtrTo(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            return ptrOfSize(.One)(T) and is(id)(meta.Child(T));
+            return ptrOfSize(.One)(T) and is(id)(Child(T));
         }
     };
     return Closure.trait;
@@ -139,7 +139,7 @@ test "isPtrTo" {
 pub fn isSliceOf(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            return ptrOfSize(.Slice)(T) and is(id)(meta.Child(T));
+            return ptrOfSize(.Slice)(T) and is(id)(Child(T));
         }
     };
     return Closure.trait;
@@ -243,7 +243,7 @@ test "isSingleItemPtr" {
 pub inline fn isIndexable(comptime T: type) bool {
     if (is(.Pointer)(T)) {
         if (ptrOfSize(.One)(T))
-            return is(.Array)(meta.Child(T));
+            return is(.Array)(Child(T));
         return true;
     }
     return multiTrait(.Any, .{
@@ -262,7 +262,7 @@ test "isIndexable" {
     try testing.expect(isIndexable(@TypeOf(array)));
     try testing.expect(isIndexable(@TypeOf(&array)));
     try testing.expect(isIndexable(@TypeOf(slice)));
-    try testing.expect(!isIndexable(meta.Child(@TypeOf(slice))));
+    try testing.expect(!isIndexable(Child(@TypeOf(slice))));
     try testing.expect(isIndexable(@TypeOf(vector)));
     try testing.expect(isIndexable(@TypeOf(tuple)));
 }
@@ -424,13 +424,13 @@ pub inline fn isZigString(comptime T: type) bool {
         })(T)) break :blk false;
         // If it's already a slice, simple check.
         if (ptrOfSize(.Slice)(T))
-            break :blk meta.Child(T) == u8;
+            break :blk Child(T) == u8;
 
         // Otherwise check if it's an array type that coerces to slice.
         if (ptrOfSize(.One)(T)) {
-            const child = meta.Child(T);
+            const child = Child(T);
             if (is(.Array)(child))
-                break :blk meta.Child(child) == u8;
+                break :blk Child(child) == u8;
         }
 
         break :blk false;
@@ -493,7 +493,7 @@ pub inline fn hasUniqueRepresentation(comptime T: type) bool {
 
         .Pointer => !ptrOfSize(.Slice)(T),
 
-        .Array => hasUniqueRepresentation(meta.Child(T)),
+        .Array => hasUniqueRepresentation(Child(T)),
 
         .Struct => |info| blk: {
             var sum_size = @as(usize, 0);
@@ -655,8 +655,8 @@ pub const FunctionProperties = enum {
 pub fn functionIs(comptime property: FunctionProperties) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (ptrOfSize(.One)(T) and is(.Fn)(meta.Child(T)))
-                return trait(meta.Child(T));
+            if (ptrOfSize(.One)(T) and is(.Fn)(Child(T)))
+                return trait(Child(T));
             return is(.Fn)(T) and @field(@typeInfo(T).Fn, "is_" ++ @tagName(property));
         }
     };
@@ -686,4 +686,20 @@ test "isGeneicFunction" {
         try testing.expect(!isGenericFunction(T));
         try testing.expect(!isGenericFunction(*const T));
     }
+}
+
+pub fn tupleOfLength(comptime length: usize) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            return isTuple(T) and @typeInfo(T).Struct.fields.len == length;
+        }
+    };
+    return Closure.trait;
+}
+
+test "tupleOfLength" {
+    try testing.expect(tupleOfLength(0)(@TypeOf(.{})));
+    try testing.expect(tupleOfLength(3)(@TypeOf(.{ 1, 2, 3 })));
+    try testing.expect(!tupleOfLength(42)(*const @TypeOf(.{})));
+    try testing.expect(!tupleOfLength(0)(u8));
 }

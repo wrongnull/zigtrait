@@ -15,13 +15,13 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const exposed_module = b.addModule(
+    _ = b.addModule(
         "zigtrait",
-        .{ .source_file = .{ .path = "src/zigtrait.zig" } },
+        .{ .root_source_file = .{ .path = "src/zigtrait.zig" } },
     );
-    
+
     const main_tests = b.addTest(.{
-        .root_source_file = exposed_module.source_file,
+        .root_source_file = .{ .path = "src/zigtrait.zig" },
         .target = target,
         .optimize = optimize,
     });
