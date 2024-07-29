@@ -8,8 +8,8 @@ const Child = std.meta.Child;
 pub const TraitFn = fn (type) callconv(.Inline) bool;
 
 pub const PredicatePolicy = enum {
-    All,
-    Any,
+    all,
+    any,
 };
 
 pub fn multiTrait(comptime policy: PredicatePolicy, comptime traits: anytype) TraitFn {
@@ -21,8 +21,8 @@ pub fn multiTrait(comptime policy: PredicatePolicy, comptime traits: anytype) Tr
             inline for (traits) |t|
                 accumulator += @intCast(@intFromBool(comptime t(T)));
             return switch (policy) {
-                .All => accumulator == traits.len,
-                .Any => accumulator > 0,
+                .all => accumulator == traits.len,
+                .any => accumulator > 0,
             };
         }
     };
@@ -44,7 +44,7 @@ test "multiTrait" {
         }
     };
 
-    const isVector = multiTrait(.All, .{
+    const isVector = multiTrait(.all, .{
         hasFn("add"),
         hasField("x"),
         hasField("y"),
@@ -164,8 +164,8 @@ pub fn containerOfLayout(comptime container_layuout: std.builtin.Type.ContainerL
 }
 
 test "conainerOfLayout" {
-    const isExtern = containerOfLayout(.Extern);
-    const isPacked = containerOfLayout(.Packed);
+    const isExtern = containerOfLayout(.@"extern");
+    const isPacked = containerOfLayout(.@"packed");
 
     const TestExStruct = extern struct {};
     const TestPStruct = packed struct {};
@@ -246,7 +246,7 @@ pub inline fn isIndexable(comptime T: type) bool {
             return is(.Array)(Child(T));
         return true;
     }
-    return multiTrait(.Any, .{
+    return multiTrait(.any, .{
         is(.Array),
         is(.Vector),
         isTuple,
@@ -268,7 +268,7 @@ test "isIndexable" {
 }
 
 pub inline fn isNumber(comptime T: type) bool {
-    return multiTrait(.Any, .{
+    return multiTrait(.any, .{
         is(.Int),
         is(.ComptimeInt),
         is(.Float),
@@ -291,7 +291,7 @@ test "isNumber" {
 }
 
 pub inline fn isIntegral(comptime T: type) bool {
-    return multiTrait(.Any, .{
+    return multiTrait(.any, .{
         is(.Int),
         is(.ComptimeInt),
     })(T);
@@ -307,7 +307,7 @@ test "isIntegral" {
 }
 
 pub inline fn isFloat(comptime T: type) bool {
-    return multiTrait(.Any, .{
+    return multiTrait(.any, .{
         is(.Float),
         is(.ComptimeFloat),
     })(T);
@@ -361,7 +361,7 @@ test "ptrQualifiedWith" {
 }
 
 pub inline fn isContainer(comptime T: type) bool {
-    return multiTrait(.Any, .{
+    return multiTrait(.any, .{
         is(.Struct),
         is(.Union),
         is(.Enum),
@@ -418,7 +418,7 @@ pub inline fn isZigString(comptime T: type) bool {
         if (!is(.Pointer)(T))
             break :blk false;
         // Check for CV qualifiers that would prevent coerction to []const u8
-        if (multiTrait(.Any, .{
+        if (multiTrait(.any, .{
             ptrQualifiedWith(.@"allowzero"),
             ptrQualifiedWith(.@"volatile"),
         })(T)) break :blk false;
@@ -593,21 +593,6 @@ fn _indicateComptime(comptime T: type) T {
 }
 
 test "isComptimeOnly" {
-    const ComptimeStringMap = std.comptime_string_map.ComptimeStringMap;
-    const TestEnum = enum {
-        A,
-        B,
-        C,
-        D,
-        E,
-    };
-    const map = ComptimeStringMap(TestEnum, .{
-        .{ "these", .D },
-        .{ "have", .A },
-        .{ "nothing", .B },
-        .{ "incommon", .C },
-        .{ "samelen", .E },
-    });
     const ComptimeType = struct {
         field: type,
     };
@@ -615,7 +600,7 @@ test "isComptimeOnly" {
         field: u8,
     };
 
-    const test_comptime_types = [_]type{ comptime_int, comptime_float, u0, i0, map, fn (comptime_int) void, ComptimeType };
+    const test_comptime_types = [_]type{ comptime_int, comptime_float, u0, i0, fn (comptime_int) void, ComptimeType };
     const test_runtime_types = [_]type{ u1, i1, u8, i8, u16, i16, u29, u32, i32, u64, i64, NonComptimeType, *const fn (u32) callconv(.C) u32 };
     inline for (test_comptime_types) |T|
         try testing.expect(isComptimeOnly(T));

@@ -17,11 +17,11 @@ pub fn build(b: *std.Build) void {
 
     _ = b.addModule(
         "zigtrait",
-        .{ .root_source_file = .{ .path = "src/zigtrait.zig" } },
+        .{ .root_source_file = b.path("src/zigtrait.zig") },
     );
 
     const main_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/zigtrait.zig" },
+        .root_source_file = b.path("src/zigtrait.zig"),
         .target = target,
         .optimize = optimize,
     });
