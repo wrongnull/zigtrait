@@ -688,3 +688,37 @@ test "tupleOfLength" {
     try testing.expect(!tupleOfLength(42)(*const @TypeOf(.{})));
     try testing.expect(!tupleOfLength(0)(u8));
 }
+
+pub fn structOfBackingInt(comptime IntTy: type) TraitFn {
+    const Closure = struct {
+        pub inline fn trait(comptime T: type) bool {
+            return is(.Struct)(T) and containerOfLayout(.@"packed")(T) and @typeInfo(T).Struct.backing_integer.? == IntTy;
+        }
+    };
+    return Closure.trait;
+}
+
+test "structOfBackingInt" {
+    const S = packed struct(u8) {
+        dummy: u8,
+    };
+    const V = packed struct {};
+    const O = u8;
+    const f = structOfBackingInt(u8);
+    try testing.expect(f(S));
+    try testing.expect(!f(V));
+    try testing.expect(!f(O));
+}
+
+pub inline fn isSentinelTerminated(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        inline .Array, .Pointer => |ty| ty.sentinel != null,
+        else => false,
+    };
+}
+
+test "isSentinelTerminated" {
+    try testing.expect(isSentinelTerminated([:0]const u8));
+    try testing.expect(isSentinelTerminated([1:0]u8));
+    try testing.expect(!isSentinelTerminated(anyerror!u8));
+}
