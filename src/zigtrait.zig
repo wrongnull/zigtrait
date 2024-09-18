@@ -3,6 +3,7 @@ const mem = std.mem;
 const debug = std.debug;
 const testing = std.testing;
 
+const StructField = std.builtin.Type.StructField;
 const Child = std.meta.Child;
 
 pub const TraitFn = fn (type) callconv(.Inline) bool;
@@ -12,7 +13,12 @@ pub const PredicatePolicy = enum {
     any,
 };
 
+fn getStructFields(comptime T: type) []const StructField {
+    return @typeInfo(T).@"struct".fields;
+}
+
 pub fn multiTrait(comptime policy: PredicatePolicy, comptime traits: anytype) TraitFn {
+    checkTraitsTuple(@TypeOf(traits));
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
             // TODO: Decide if this call is necessary here
@@ -27,6 +33,15 @@ pub fn multiTrait(comptime policy: PredicatePolicy, comptime traits: anytype) Tr
         }
     };
     return Closure.trait;
+}
+
+inline fn checkTraitsTuple(comptime T: type) void {
+    if (!isTuple(T))
+        @compileError("multiTrait: expected tuple, found " ++ @typeName(T));
+    const fields = getStructFields(T);
+    inline for (fields) |field|
+        if (field.type != TraitFn)
+            @compileError("multiTrait: expected tuple of " ++ @typeName(TraitFn) ++ " found " ++ @typeName(T));
 }
 
 test "multiTrait" {
@@ -58,7 +73,7 @@ pub fn hasFn(comptime name: []const u8) TraitFn {
         pub inline fn trait(comptime T: type) bool {
             if (!isContainer(T)) return false;
             if (!@hasDecl(T, name)) return false;
-            return is(.Fn)(@TypeOf(@field(T, name)));
+            return is(.@"fn")(@TypeOf(@field(T, name)));
         }
     };
     return Closure.trait;
@@ -78,7 +93,7 @@ pub fn hasField(comptime name: []const u8) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
             const fields = switch (@typeInfo(T)) {
-                inline .Struct, .Union, .Enum => |c| c.fields,
+                inline .@"struct", .@"union", .@"enum" => |c| c.fields,
                 else => return false,
             };
 
@@ -114,11 +129,11 @@ pub fn is(comptime id: std.builtin.TypeId) TraitFn {
 }
 
 test "is" {
-    try testing.expect(is(.Int)(u8));
-    try testing.expect(!is(.Int)(f32));
-    try testing.expect(is(.Pointer)(*u8));
-    try testing.expect(is(.Void)(void));
-    try testing.expect(!is(.Optional)(anyerror));
+    try testing.expect(is(.int)(u8));
+    try testing.expect(!is(.int)(f32));
+    try testing.expect(is(.pointer)(*u8));
+    try testing.expect(is(.void)(void));
+    try testing.expect(!is(.optional)(anyerror));
 }
 
 pub fn isPtrTo(comptime id: std.builtin.TypeId) TraitFn {
@@ -131,9 +146,9 @@ pub fn isPtrTo(comptime id: std.builtin.TypeId) TraitFn {
 }
 
 test "isPtrTo" {
-    try testing.expect(!isPtrTo(.Struct)(struct {}));
-    try testing.expect(isPtrTo(.Struct)(*struct {}));
-    try testing.expect(!isPtrTo(.Struct)(**struct {}));
+    try testing.expect(!isPtrTo(.@"struct")(struct {}));
+    try testing.expect(isPtrTo(.@"struct")(*struct {}));
+    try testing.expect(!isPtrTo(.@"struct")(**struct {}));
 }
 
 pub fn isSliceOf(comptime id: std.builtin.TypeId) TraitFn {
@@ -146,16 +161,16 @@ pub fn isSliceOf(comptime id: std.builtin.TypeId) TraitFn {
 }
 
 test "isSliceOf" {
-    try testing.expect(!isSliceOf(.Struct)(struct {}));
-    try testing.expect(isSliceOf(.Struct)([]struct {}));
-    try testing.expect(!isSliceOf(.Struct)([][]struct {}));
+    try testing.expect(!isSliceOf(.@"struct")(struct {}));
+    try testing.expect(isSliceOf(.@"struct")([]struct {}));
+    try testing.expect(!isSliceOf(.@"struct")([][]struct {}));
 }
 
 pub fn containerOfLayout(comptime container_layuout: std.builtin.Type.ContainerLayout) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
             return switch (@typeInfo(T)) {
-                inline .Struct, .Union => |container| container.layout == container_layuout,
+                inline .@"struct", .@"union" => |container| container.layout == container_layuout,
                 else => false,
             };
         }
@@ -184,8 +199,8 @@ pub fn intOfSignedness(comptime int_signedness: std.builtin.Signedness) TraitFn 
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
             return switch (@typeInfo(T)) {
-                .Int => |i| i.signedness == int_signedness,
-                .ComptimeInt => int_signedness == .signed,
+                .int => |i| i.signedness == int_signedness,
+                .comptime_int => int_signedness == .signed,
                 else => false,
             };
         }
@@ -211,7 +226,7 @@ test "intOfSignedness" {
 pub fn ptrOfSize(comptime ptr_size: std.builtin.Type.Pointer.Size) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            return is(.Pointer)(T) and @typeInfo(T).Pointer.size == ptr_size;
+            return is(.pointer)(T) and @typeInfo(T).pointer.size == ptr_size;
         }
     };
     return Closure.trait;
@@ -241,14 +256,14 @@ test "isSingleItemPtr" {
 }
 
 pub inline fn isIndexable(comptime T: type) bool {
-    if (is(.Pointer)(T)) {
+    if (is(.pointer)(T)) {
         if (ptrOfSize(.One)(T))
-            return is(.Array)(Child(T));
+            return is(.array)(Child(T));
         return true;
     }
     return multiTrait(.any, .{
-        is(.Array),
-        is(.Vector),
+        is(.array),
+        is(.vector),
         isTuple,
     })(T);
 }
@@ -269,10 +284,10 @@ test "isIndexable" {
 
 pub inline fn isNumber(comptime T: type) bool {
     return multiTrait(.any, .{
-        is(.Int),
-        is(.ComptimeInt),
-        is(.Float),
-        is(.ComptimeFloat),
+        is(.int),
+        is(.comptime_int),
+        is(.float),
+        is(.comptime_float),
     })(T);
 }
 
@@ -292,8 +307,8 @@ test "isNumber" {
 
 pub inline fn isIntegral(comptime T: type) bool {
     return multiTrait(.any, .{
-        is(.Int),
-        is(.ComptimeInt),
+        is(.int),
+        is(.comptime_int),
     })(T);
 }
 
@@ -308,8 +323,8 @@ test "isIntegral" {
 
 pub inline fn isFloat(comptime T: type) bool {
     return multiTrait(.any, .{
-        is(.Float),
-        is(.ComptimeFloat),
+        is(.float),
+        is(.comptime_float),
     })(T);
 }
 
@@ -331,7 +346,7 @@ pub const PointerQualifiers = enum {
 pub fn ptrQualifiedWith(comptime qualifier: PointerQualifiers) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            return is(.Pointer)(T) and @field(@typeInfo(T).Pointer, "is_" ++ @tagName(qualifier));
+            return is(.pointer)(T) and @field(@typeInfo(T).pointer, "is_" ++ @tagName(qualifier));
         }
     };
     return Closure.trait;
@@ -362,10 +377,10 @@ test "ptrQualifiedWith" {
 
 pub inline fn isContainer(comptime T: type) bool {
     return multiTrait(.any, .{
-        is(.Struct),
-        is(.Union),
-        is(.Enum),
-        is(.Opaque),
+        is(.@"struct"),
+        is(.@"union"),
+        is(.@"enum"),
+        is(.@"opaque"),
     })(T);
 }
 
@@ -388,7 +403,7 @@ test "isContainer" {
 }
 
 pub inline fn isTuple(comptime T: type) bool {
-    return is(.Struct)(T) and @typeInfo(T).Struct.is_tuple;
+    return is(.@"struct")(T) and @typeInfo(T).@"struct".is_tuple;
 }
 
 test "isTuple" {
@@ -400,103 +415,28 @@ test "isTuple" {
     try testing.expect(isTuple(@TypeOf(t3)));
 }
 
-/// Returns true if the passed type will coerce to []const u8.
-/// Any of the following are considered strings:
-/// ```
-/// []const u8, [:S]const u8, *const [N]u8, *const [N:S]u8,
-/// []u8, [:S]u8, *[:S]u8, *[N:S]u8.
-/// ```
-/// These types are not considered strings:
-/// ```
-/// u8, [N]u8, [*]const u8, [*:0]const u8,
-/// [*]const [N]u8, []const u16, []const i8,
-/// *const u8, ?[]const u8, ?*const [N]u8.
-/// ```
-pub inline fn isZigString(comptime T: type) bool {
-    return blk: {
-        // Only pointer types can be strings, no optionals
-        if (!is(.Pointer)(T))
-            break :blk false;
-        // Check for CV qualifiers that would prevent coerction to []const u8
-        if (multiTrait(.any, .{
-            ptrQualifiedWith(.@"allowzero"),
-            ptrQualifiedWith(.@"volatile"),
-        })(T)) break :blk false;
-        // If it's already a slice, simple check.
-        if (ptrOfSize(.Slice)(T))
-            break :blk Child(T) == u8;
-
-        // Otherwise check if it's an array type that coerces to slice.
-        if (ptrOfSize(.One)(T)) {
-            const child = Child(T);
-            if (is(.Array)(child))
-                break :blk Child(child) == u8;
-        }
-
-        break :blk false;
-    };
-}
-
-test "isZigString" {
-    try testing.expect(isZigString([]const u8));
-    try testing.expect(isZigString([]u8));
-    try testing.expect(isZigString([:0]const u8));
-    try testing.expect(isZigString([:0]u8));
-    try testing.expect(isZigString([:5]const u8));
-    try testing.expect(isZigString([:5]u8));
-    try testing.expect(isZigString(*const [0]u8));
-    try testing.expect(isZigString(*[0]u8));
-    try testing.expect(isZigString(*const [0:0]u8));
-    try testing.expect(isZigString(*[0:0]u8));
-    try testing.expect(isZigString(*const [0:5]u8));
-    try testing.expect(isZigString(*[0:5]u8));
-    try testing.expect(isZigString(*const [10]u8));
-    try testing.expect(isZigString(*[10]u8));
-    try testing.expect(isZigString(*const [10:0]u8));
-    try testing.expect(isZigString(*[10:0]u8));
-    try testing.expect(isZigString(*const [10:5]u8));
-    try testing.expect(isZigString(*[10:5]u8));
-
-    try testing.expect(!isZigString(u8));
-    try testing.expect(!isZigString([4]u8));
-    try testing.expect(!isZigString([4:0]u8));
-    try testing.expect(!isZigString([*]const u8));
-    try testing.expect(!isZigString([*]const [4]u8));
-    try testing.expect(!isZigString([*c]const u8));
-    try testing.expect(!isZigString([*c]const [4]u8));
-    try testing.expect(!isZigString([*:0]const u8));
-    try testing.expect(!isZigString([*:0]const u8));
-    try testing.expect(!isZigString(*[]const u8));
-    try testing.expect(!isZigString(?[]const u8));
-    try testing.expect(!isZigString(?*const [4]u8));
-    try testing.expect(!isZigString([]allowzero u8));
-    try testing.expect(!isZigString([]volatile u8));
-    try testing.expect(!isZigString(*allowzero [4]u8));
-    try testing.expect(!isZigString(*volatile [4]u8));
-}
-
 /// True if every value of the type `T` has a unique bit pattern representing it.
 /// In other words, `T` has no unused bits and no padding.
 pub inline fn hasUniqueRepresentation(comptime T: type) bool {
     return switch (@typeInfo(T)) {
         else => false, // TODO can we know if it's true for some of these types ?
 
-        .AnyFrame,
-        .Enum,
-        .ErrorSet,
-        .Fn,
+        .@"anyframe",
+        .@"enum",
+        .error_set,
+        .@"fn",
         => true,
 
-        .Bool => false,
+        .bool => false,
 
-        .Int => @sizeOf(T) * @bitSizeOf(c_char) == @bitSizeOf(T),
+        .int => @sizeOf(T) * @bitSizeOf(c_char) == @bitSizeOf(T),
 
-        .Pointer => !ptrOfSize(.Slice)(T),
+        .pointer => !ptrOfSize(.Slice)(T),
 
-        .Array => hasUniqueRepresentation(Child(T)),
+        .array => hasUniqueRepresentation(Child(T)),
 
-        .Struct => |info| blk: {
-            var sum_size = @as(usize, 0);
+        .@"struct" => |info| blk: {
+            var sum_size: usize = 0;
 
             inline for (info.fields) |field| {
                 const FieldType = field.type;
@@ -507,7 +447,7 @@ pub inline fn hasUniqueRepresentation(comptime T: type) bool {
             break :blk @sizeOf(T) == sum_size;
         },
 
-        .Vector => |info| hasUniqueRepresentation(info.child) and
+        .vector => |info| hasUniqueRepresentation(info.child) and
             @sizeOf(T) == @sizeOf(info.child) * info.len,
     };
 }
@@ -583,9 +523,9 @@ test "hasUniqueRepresentation" {
     try testing.expect(hasUniqueRepresentation(@Vector(4, u16)));
 }
 
-/// True if type can be used only in comppile-time
+/// True if value of such type can be used only in comppile-time
 pub inline fn isComptimeOnly(comptime T: type) bool {
-    return @typeInfo(@TypeOf(.{_indicateComptime(T)})).Struct.fields[0].is_comptime;
+    return @typeInfo(@TypeOf(.{_indicateComptime(T)})).@"struct".fields[0].is_comptime;
 }
 
 fn _indicateComptime(comptime T: type) T {
@@ -609,7 +549,7 @@ test "isComptimeOnly" {
 }
 
 pub inline fn isExhaustiveEnum(comptime T: type) bool {
-    return is(.Enum)(T) and @typeInfo(T).Enum.is_exhaustive;
+    return is(.@"enum")(T) and @typeInfo(T).@"enum".is_exhaustive;
 }
 
 test "isExhaustiveEnum" {
@@ -640,9 +580,9 @@ pub const FunctionProperties = enum {
 pub fn functionIs(comptime property: FunctionProperties) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (ptrOfSize(.One)(T) and is(.Fn)(Child(T)))
+            if (ptrOfSize(.One)(T) and is(.@"fn")(Child(T)))
                 return trait(Child(T));
-            return is(.Fn)(T) and @field(@typeInfo(T).Fn, "is_" ++ @tagName(property));
+            return is(.@"fn")(T) and @field(@typeInfo(T).@"fn", "is_" ++ @tagName(property));
         }
     };
     return Closure.trait;
@@ -676,7 +616,7 @@ test "isGeneicFunction" {
 pub fn tupleOfLength(comptime length: usize) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            return isTuple(T) and @typeInfo(T).Struct.fields.len == length;
+            return isTuple(T) and @typeInfo(T).@"struct".fields.len == length;
         }
     };
     return Closure.trait;
@@ -692,7 +632,7 @@ test "tupleOfLength" {
 pub fn structOfBackingInt(comptime IntTy: type) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            return is(.Struct)(T) and containerOfLayout(.@"packed")(T) and @typeInfo(T).Struct.backing_integer.? == IntTy;
+            return is(.@"struct")(T) and containerOfLayout(.@"packed")(T) and @typeInfo(T).@"struct".backing_integer.? == IntTy;
         }
     };
     return Closure.trait;
@@ -712,7 +652,7 @@ test "structOfBackingInt" {
 
 pub inline fn isSentinelTerminated(comptime T: type) bool {
     return switch (@typeInfo(T)) {
-        inline .Array, .Pointer => |ty| ty.sentinel != null,
+        inline .array, .pointer => |ty| ty.sentinel != null,
         else => false,
     };
 }
