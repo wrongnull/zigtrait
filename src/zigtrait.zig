@@ -6,7 +6,7 @@ const testing = std.testing;
 const StructField = std.builtin.Type.StructField;
 const Child = std.meta.Child;
 
-pub const TraitFn = fn (type) callconv(.Inline) bool;
+pub const TraitFn = fn (comptime type) callconv(.Inline) bool;
 
 pub const PredicatePolicy = enum {
     all,
@@ -41,7 +41,7 @@ inline fn checkTraitsTuple(comptime T: type) void {
     const fields = getStructFields(T);
     inline for (fields) |field|
         if (field.type != TraitFn)
-            @compileError("multiTrait: expected tuple of " ++ @typeName(TraitFn) ++ " found " ++ @typeName(T));
+            @compileError("multiTrait: expected tuple of " ++ @typeName(TraitFn) ++ " found " ++ @typeName(field.type));
 }
 
 test "multiTrait" {
@@ -139,7 +139,7 @@ test "is" {
 pub fn isPtrTo(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            return ptrOfSize(.One)(T) and is(id)(Child(T));
+            return ptrOfSize(.one)(T) and is(id)(Child(T));
         }
     };
     return Closure.trait;
@@ -154,7 +154,7 @@ test "isPtrTo" {
 pub fn isSliceOf(comptime id: std.builtin.TypeId) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            return ptrOfSize(.Slice)(T) and is(id)(Child(T));
+            return ptrOfSize(.slice)(T) and is(id)(Child(T));
         }
     };
     return Closure.trait;
@@ -233,9 +233,9 @@ pub fn ptrOfSize(comptime ptr_size: std.builtin.Type.Pointer.Size) TraitFn {
 }
 
 test "isSingleItemPtr" {
-    const isSingleItemPtr = ptrOfSize(.One);
-    const isManyItemPtr = ptrOfSize(.Many);
-    const isSlice = ptrOfSize(.Slice);
+    const isSingleItemPtr = ptrOfSize(.one);
+    const isManyItemPtr = ptrOfSize(.many);
+    const isSlice = ptrOfSize(.slice);
 
     const array = [_]u8{0} ** 10;
     var runtime_zero: usize = 0;
@@ -257,7 +257,7 @@ test "isSingleItemPtr" {
 
 pub inline fn isIndexable(comptime T: type) bool {
     if (is(.pointer)(T)) {
-        if (ptrOfSize(.One)(T))
+        if (ptrOfSize(.one)(T))
             return is(.array)(Child(T));
         return true;
     }
@@ -431,7 +431,7 @@ pub inline fn hasUniqueRepresentation(comptime T: type) bool {
 
         .int => @sizeOf(T) * @bitSizeOf(c_char) == @bitSizeOf(T),
 
-        .pointer => !ptrOfSize(.Slice)(T),
+        .pointer => !ptrOfSize(.slice)(T),
 
         .array => hasUniqueRepresentation(Child(T)),
 
@@ -580,7 +580,7 @@ pub const FunctionProperties = enum {
 pub fn functionIs(comptime property: FunctionProperties) TraitFn {
     const Closure = struct {
         pub inline fn trait(comptime T: type) bool {
-            if (ptrOfSize(.One)(T) and is(.@"fn")(Child(T)))
+            if (ptrOfSize(.one)(T) and is(.@"fn")(Child(T)))
                 return trait(Child(T));
             return is(.@"fn")(T) and @field(@typeInfo(T).@"fn", "is_" ++ @tagName(property));
         }
@@ -652,7 +652,7 @@ test "structOfBackingInt" {
 
 pub inline fn isSentinelTerminated(comptime T: type) bool {
     return switch (@typeInfo(T)) {
-        inline .array, .pointer => |ty| ty.sentinel != null,
+        inline .array, .pointer => |ty| ty.sentinel() != null,
         else => false,
     };
 }

@@ -1,6 +1,8 @@
 .{
-    .name = "zigtrait",
-    .version = "1.4.0",
+    .name = .zigtrait,
+    .version = "1.5.0",
+    .minimum_zig_version = "0.14.0",
+    .fingerprint = 0x344b8e215eaaee0c,
     .paths = .{
         "build.zig",
         "build.zig.zon",
